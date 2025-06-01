@@ -1,0 +1,29 @@
+# === ROS2 build artifacts ===
+build/
+install/
+log/
+
+# === Python cache ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# === Colcon files ===
+.colcon_install_layout
+.colcon_build.lock
+
+# === VSCode settings (optional) ===
+**/.vscode/
+
+# === System files ===
+.DS_Store
+Thumbs.db
+
+# === 기타 ===
+*.swp
+*.swo
+*.bak
+
+*.mp3
+**/.env
