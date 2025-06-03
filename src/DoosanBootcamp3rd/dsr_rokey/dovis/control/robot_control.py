@@ -12,6 +12,8 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from ament_index_python.packages import get_package_share_directory
 from control.onrobot import RG
+from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Int32
 
 package_path = get_package_share_directory("dovis")
 
@@ -42,6 +44,8 @@ try:
     from DSR_ROBOT2 import (
         movej, 
         movel, 
+        amovel,
+        amovesx,
         get_current_posx, 
         mwait,
         wait,
@@ -53,7 +57,10 @@ try:
         set_desired_force,
         release_force,
         release_compliance_ctrl,
-        DR_FC_MOD_REL
+        DR_FC_MOD_REL,
+        drl_script_pause,
+        drl_script_resume,
+        set_robot_mode,
     )
 except ImportError as e:
     print(f"Error importing DSR_ROBOT2: {e}")
@@ -114,12 +121,92 @@ class RobotController(Node):
             self.items = list(class_dict.items())
         self.init_robot_with_camera()
         self.target_positions = {}
+        self.subscription = self.create_subscription(
+            Float32MultiArray,
+            'box_command',
+            self.box_callback,
+            10
+        )
+        # self.personSubscription = self.create_subscription(
+        #     Int32,
+        #     'person_count',
+        #     self.person_callback,
+        #     10
+        # )
+        self.faceSubscription = self.create_subscription(
+            Float32MultiArray,
+            'face_depth_command',
+            self.face_callback,
+            10
+        )
+        self.rotate_state = False
+        self.person_msg_count = 0
+        self.face_count = 0
+        self.position_data = []
     def get_robot_pose_matrix(self, x, y, z, rx, ry, rz):
         R = Rotation.from_euler("ZYZ", [rx, ry, rz], degrees=True).as_matrix()
         T = np.eye(4)
         T[:3, :3] = R
         T[:3, 3] = [x, y, z]
         return T
+    
+    def box_callback(self,msg):
+        float_list = msg.data
+        width = int(float_list[2] - float_list[0])  
+        height = int(float_list[3] - float_list[1]) 
+
+        if width > height:
+            self.get_logger().error("가로가 더길다")
+            self.rotate_state = True
+        else:
+            self.get_logger().error("세로가 더길다")
+            self.rotate_state = False
+
+    # def person_callback(self,msg):
+    #     personCount = msg.data
+    #     if personCount > 2:
+    #         self.get_logger().info(f"수신된 명령: {str(personCount)}")
+    #         self.person_msg_count += 1
+    #     if self.person_msg_count > 10:
+    #         self.send_message('경고')
+    #         self.person_msg_count = 0 
+    
+    def face_callback(self,msg):
+        pos = msg.data.tolist()
+        self.get_logger().info(f"[DEBUG] 수신된 좌표 리스트: {pos}")
+        gripper2cam_path = os.path.join(
+            package_path, "resource", "T_gripper2camera.npy"
+        )
+        try:
+            robot_posx = get_current_posx()[0]
+            td_coord = self.transform_to_base(pos[:3], gripper2cam_path, robot_posx)
+            robot_posx[3] += pos[3]
+            robot_posx[4] += pos[4]
+            if td_coord[2] and sum(td_coord) != 0:
+                td_coord[2] += DEPTH_OFFSET - 5.0 
+                td_coord[2] = max(td_coord[2], MIN_DEPTH)  
+            target_pos = list(td_coord[:3]) + robot_posx[3:]
+            target_pos[0] = min(max(target_pos[0], 200), 600)   
+            target_pos[1] = min(max(target_pos[1], -170), -70)  
+            target_pos[2] = min(max(target_pos[2], 400), 600)
+            target_pos[3] = min(max(target_pos[3], 55), 105)      
+            target_pos[4] = min(max(target_pos[4], -105), -75)
+            if target_pos[0] < 250:
+                if target_pos[2] < 450:
+                    target_pos[2] = 450
+            self.position_data.append(target_pos)
+            self.face_count += 1
+            if self.face_count > 30:
+                self.send_message('안녕하세요.')
+                self.face_count = 0
+            if len(self.position_data) > 6:
+                self.place_amovesx(self.position_data)
+            self.get_logger().info(f"[DEBUG] target_pos : {target_pos}")
+            self.place_amove(target_pos)
+        except IndexError as e:
+            self.get_logger().info(f"[DEBUG] : {str(e)}")
+            pass
+
 
     def transform_to_base(self, camera_coords, gripper2cam_path, robot_pos):
         gripper2cam = np.load(gripper2cam_path)
@@ -138,97 +225,41 @@ class RobotController(Node):
         rclpy.spin_until_future_complete(self, get_keyword_future)
         get_keyword_result = get_keyword_future.result()
         if get_keyword_future.result().success:
-            target_list = get_keyword_result.message.split()
-            self.get_logger().info(f"키워드 서비스 응답: {target_list}")
-            for target in target_list:
-                if target == "춤":
-                    self.get_logger().info("춤 명령을 받았습니다! 춤 동작을 시작합니다.")
-                    self.perform_dance()
-                    continue
-                elif target == '홈' or target == 'home':
-                    self.get_logger().info("홈으로 이동합니다.")
-                    self.init_robot()
-                    continue
-                elif target == "자동":
-                    max_attempts = 3000
-                    attempt = 0
-                    while attempt < max_attempts:
-                        target_pos = self.get_target_pos(target)
-                        if target_pos is None or sum(target_pos) == 0:
-                            attempt += 1
-                            continue
-                        target_pos[2] = 450
-                        self.place_move(target_pos)
-                elif target == '망치':
-                    hand_pos = self.get_target_pos(target)
-                    if hand_pos is None:
-                        self.send_message('위치 확인이 안돼요')
-                        self.init_robot_with_camera(True)
-                    else:
-                        self.send_message('위치 확인했어요')
-                        self.init_robot()
-                        search_count = 0
-                        while True:
-                            target_pos = self.get_target_pos('Screwdriver')
-                            if search_count > 5 or target_pos is not None:
-                                break
-                            if target_pos is None or sum(target_pos) == 0:
-                                self.search_target()
-                                search_count += 1
-                        self.pick_and_place_target(target_pos)
-                        self.init_robot_with_camera(False)
-                        self.place_move(hand_pos,1,300)
-                        self.send_message('받으세요')
-                        count = 0
-                        get_state = True
-                        force_control_on(1)
-                        while not check_force_condition(DR_AXIS_Z, max=3) or not check_force_condition(DR_AXIS_X, max=2) or not check_force_condition(DR_AXIS_Y, max=3):
-                            count += 1
-                            if count % 3000 == 0:
-                                self.send_message('팔 아파요')
-                            if count > 10000:
-                                get_state = False
-                                break
-                            pass
-                        force_control_off()
-                        if get_state:
-                            self.target_positions['Screwdriver'] = target_pos
-                            self.gripper_open()
-                            self.send_message('감사합니다.')
-                            self.init_robot_with_camera(True)
-                        else:
-                            self.send_message('받지 않아서 원래 자리로 돌아가요.')
-                            self.init_robot_with_camera(False)
-                            self.pick_and_place_drop(target_pos)
-                elif target == '가져가':
-                    while True:
-                        hand_pos = self.get_target_pos(target)
-                        if hand_pos is not None and sum(hand_pos) != 0:
-                            break
-                    self.place_move(hand_pos,1,200)
-                    while True:
-                        target_pos = self.get_target_pos('Screwdriver')
-                        if target_pos is not None and sum(target_pos) !=0:
-                            self.send_message(f'Screwdriver 인식 확인했습니다.')
-                            break
-                    self.send_message('물건을 주세요')
-                    force_control_on(1)
-                    while not check_force_condition(DR_AXIS_Y, max=2):
-                        pass
-                    force_control_off()
-                    self.gripper_close()
-                    self.send_message('감사합니다.')
-                    self.init_robot(False)
-                    self.go_target('Screwdriver')
-                else:
-                    target_pos = self.get_target_pos(target)
-                    if target_pos is None:
-                        self.get_logger().warn("No target position")
-                    else:
-                        self.get_logger().info(f"target position: {target_pos}")
-                        self.pick_and_place_target(target_pos)
+            raw_message = get_keyword_result.message.strip()
+            if '홈' in raw_message:
+                self.send_message('홈으로 이동합니다.')
+                self.init_robot_with_camera(True)
+                return
+            if '이거' in raw_message:
+                self.send_message('네')
+                self.init_robot(True)
+            if raw_message.startswith('[') and raw_message.endswith(']'):
+                raw_message = raw_message[1:-1]
+            try:
+                if '/' not in raw_message:
+                    self.send_message('이해하지못했어요. 다시 말씀해주세요.')
+                    self.get_logger().error("포맷 오류: '/' 구분자가 없습니다. 받은 메시지: " + raw_message)
+                    return
+                tool_part, location_part = raw_message.split('/')
+                tools = tool_part.strip().split()       # 공백 기준 도구 리스트
+                locations = location_part.strip().split()  # 공백 기준 위치 리스트
+            except ValueError:
+                self.get_logger().error("포맷이 올바르지 않습니다. '/' 구분이 있어야 합니다.")
+                return
+            self.get_logger().info(f"도구 리스트: {tools}")
+            self.get_logger().info(f"위치 리스트: {locations}")
+
+            for tool, location in zip(tools, locations):
+                #tool = tool.capitalize() #앞글자 대문자로
+                tool = tool.lower()
+                if location in '가져와':
+                    self.bring_tool_move(tool,location)
+                if location in '가져가':
+                    self.take_tool_move(tool,location)
         else:
-            self.get_logger().warn(f"{get_keyword_result.message}")
+            message = get_keyword_result.message
+            self.get_logger().warn(f"{message}")
+            self.send_message(message)
             return
 
     def get_target_pos(self, target):
@@ -252,9 +283,7 @@ class RobotController(Node):
             robot_posx = get_current_posx()[0]
             if target == '자동':
                 td_coord = self.transform_to_base(result[:3], gripper2cam_path, robot_posx)
-                robot_posx[3] += result[3]
-                robot_posx[4] += result[4]
-            if target == '망치' or target =='가져가':
+            if target == '가져와' or target =='가져가':
                 td_coord = self.transform_to_base(result[:3], gripper2cam_path, robot_posx)
             else:
                 td_coord = self.transform_to_base(result, gripper2cam_path, robot_posx)
@@ -298,6 +327,15 @@ class RobotController(Node):
             target_pos[index] += param
         movel(target_pos, vel=VELOCITY, acc=ACC)
 
+    def place_amove(self, target_pos , index = None , param = None):
+        if index is not None and param is not None:
+            target_pos[index] += param
+        amovel(target_pos, vel=VELOCITY, acc=ACC)
+    
+    def place_amovesx(self,target_list):
+        amovesx(target_list, vel=[100, 30], acc=[200, 60])
+        self.position_data.clear()
+
     def search_target(self):
         pos = get_current_posx()[0]
         pos[0] += 50
@@ -327,12 +365,80 @@ class RobotController(Node):
         self.pick_and_place_drop(target_pos)
         self.init_robot_with_camera(True)
 
-    def perform_dance(self):
-        dance = [posx(367.31, 17.07, 450.32, 88.13, 179.98, 88.03),posx(380.31, 7.07, 400.32, 88.13, 179.98, 88.03),
-                posx(307.31, 7.07, 450.32, 88.13, 179.98, 88.03),posx(367.31, 17.07, 370.32, 70.13, 179.98, 88.03)]
-        for i in dance:
-            movel(i, vel=VELOCITY, acc=ACC)
-        mwait()
+    def bring_tool_move(self,tool,position):
+        hand_search_count = 0 # 어깨 위치 인식 카운트
+        tool_search_count = 0 # 물체 위치 인식 카운트
+        wait_count = 0  # 받을때 까지 기다리는 카운트
+        get_state = True # 물건을 받았는지 확인 상태
+        hand_pos = None
+        while True:
+            hand_pos = self.get_target_pos(position)
+            if hand_pos is None or sum(hand_pos) == 0:
+                hand_search_count += 1
+            if hand_pos is not None or hand_search_count > 3000:
+                break
+        if hand_pos is None or sum(hand_pos) == 0:
+            self.send_message('위치 확인이 안돼요')
+            self.init_robot_with_camera(True)
+            return
+        hand_pos = self.safe_area(hand_pos)
+        self.send_message('위치 확인했어요')
+        self.init_robot()
+        self.place_move(get_current_posx()[0],0,-30)
+        while True:
+            target_pos = self.get_target_pos(tool)
+            if tool_search_count > 5 or target_pos is not None:
+                break
+            if target_pos is None or sum(target_pos) == 0:
+                self.search_target()
+                tool_search_count += 1
+        if target_pos is None or sum(target_pos) == 0:
+            self.send_message(f'{tool}를 찾지 못했습니다.')
+            self.init_robot_with_camera(False)
+            return
+        if self.rotate_state == True:
+            target_pos[5] += 90
+            self.rotate_state == False
+        self.pick_and_place_target(target_pos)
+        self.init_robot_with_camera(False)
+        self.place_move(hand_pos,1,300)
+        self.send_message(f'{tool} 받으세요')
+        force_control_on(1)
+        while not check_force_condition(DR_AXIS_X, max=3):
+            wait_count += 1
+            if wait_count % 3000 == 0:
+                self.send_message('팔 아파요')
+            if wait_count > 10000:
+                get_state = False
+                break
+            pass
+        force_control_off()     
+        if get_state:
+            self.target_positions[tool] = target_pos
+            self.gripper_open()
+            self.send_message('감사합니다.')
+        else:
+            self.send_message('받지 않아서 원래 자리로 돌아가요.')
+            self.init_robot_with_camera(False)
+            self.pick_and_place_drop(target_pos)
+        self.init_robot_with_camera(True)
+    
+    def take_tool_move(self,tool,position):
+        while True:
+            hand_pos = self.get_target_pos(position)
+            if hand_pos is not None and sum(hand_pos) != 0:
+                break
+        hand_pos = self.safe_area(hand_pos)
+        self.place_move(hand_pos,1,200)
+        self.send_message(f'{tool}을 주세요')
+        force_control_on(1)
+        while not check_force_condition(DR_AXIS_X, max=3):
+            pass
+        force_control_off()
+        self.gripper_close()
+        self.send_message('감사합니다.')
+        self.init_robot(False)
+        self.go_target(tool)
 
     def send_message(self,text):
         msg = String()
@@ -350,6 +456,12 @@ class RobotController(Node):
         while gripper.get_status()[0]:
             time.sleep(0.5)
         wait(0.1)
+
+    def safe_area(self,target_pos):
+        target_pos[0] = min(max(target_pos[0], 0), 400)
+        target_pos[1] = min(max(target_pos[1], -700), -400)
+        target_pos[2] = min(max(target_pos[2], 200), 500)
+        return target_pos
         
 
 def main(args=None):

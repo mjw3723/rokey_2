@@ -16,14 +16,16 @@ import numpy as np
 # mp_draw = mp.solutions.drawing_utils
 
 mp_pose = mp.solutions.pose
+mp_hands = mp.solutions.hands
 pose = mp_pose.Pose(static_image_mode=False)
+hands = mp_hands.Hands(static_image_mode=False)
 mp_draw = mp.solutions.drawing_utils
 
 PACKAGE_NAME = "dovis"
 PACKAGE_PATH = get_package_share_directory(PACKAGE_NAME)
 
-YOLO_MODEL_FILENAME = "best.pt"
-YOLO_CLASS_NAME_JSON = "class_name_tool.json"
+YOLO_MODEL_FILENAME = "yolo8_2.pt"
+YOLO_CLASS_NAME_JSON = "class_name_tool2.json"
 
 YOLO_MODEL_PATH = os.path.join(PACKAGE_PATH, "resource", YOLO_MODEL_FILENAME)
 YOLO_JSON_PATH = os.path.join(PACKAGE_PATH, "resource", YOLO_CLASS_NAME_JSON)
@@ -146,7 +148,7 @@ class YoloModel:
             print("[DEBUG] 손 인식용 프레임이 없습니다.")
             return None
         latest_frame = frames[-1]
-        hand_pos = self.detect_shoulder(latest_frame)
+        hand_pos = self.detect_pose(latest_frame,mp_pose.PoseLandmark.RIGHT_SHOULDER)
         print(f"[DEBUG] 감지된 손 위치: {hand_pos}")
         return hand_pos
     
@@ -157,54 +159,118 @@ class YoloModel:
             print("[DEBUG] 손 인식용 프레임이 없습니다.")
             return None
         latest_frame = frames[-1]
-        hand_pos = self.detect_hand(latest_frame)
+        hand_pos = self.detect_pose(latest_frame,mp_pose.PoseLandmark.RIGHT_WRIST)
         print(f"[DEBUG] 감지된 손 위치: {hand_pos}")
         return hand_pos
     
-    def detect_shoulder(self, frame):
+    def get_face_detection(self,img_node):
+        rclpy.spin_once(img_node)
+        frames = self.get_frames(img_node)
+        if not frames:
+            print("[DEBUG] 손 인식용 프레임이 없습니다.")
+            return None
+        latest_frame = frames[-1]
+        face_pos = self.detect_pose(latest_frame,mp_pose.PoseLandmark.NOSE)
+        print(f"[DEBUG] 감지된 얼굴 위치: {face_pos}")
+        return face_pos
+    
+    def get_hand_detection2(self,img_node):
+        rclpy.spin_once(img_node)
+        frames = self.get_frames(img_node)
+        if not frames:
+            print("[DEBUG] 손 인식용 프레임이 없습니다.")
+            return None
+        latest_frame = frames[-1]
+        hand_pos = self.detect_hand2(latest_frame)
+        print(f"[DEBUG] 감지된 손 위치: {hand_pos}")
+        return hand_pos
+        
+
+    def detect_pose(self,frame,landmark):
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         height, width, _ = frame.shape
         results = pose.process(img_rgb)
         if results.pose_landmarks:
-            shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER]
+            position = results.pose_landmarks.landmark[landmark]
             height, width, _ = frame.shape
             center_x = width // 2
             center_y = height // 2
-            x_pixel = int(shoulder.x * width)
-            y_pixel = int(shoulder.y * height)
-            if y_pixel < center_y:
-                rx = 1   
+            x_pixel = int(position.x * width)
+            y_pixel = int(position.y * height)
+            if abs(x_pixel - center_x) < 20:
+                rx = 0
+            elif x_pixel < center_x:
+                rx = -3
             else:
-                rx = -1  
-
-            if x_pixel < center_x:
-                ry = 1   
+                rx = 3
+            if abs(y_pixel - center_y) < 20:
+                ry = 0
+            elif y_pixel < center_y:
+                ry = -3
             else:
-                ry = -1  
-            print(f"[DEBUG] 검지 끝 좌표: ({x_pixel}, {y_pixel})")  # 🟢 디버깅용 출력
+                ry = 3
+            print(f"[DEBUG] detect 좌표: ({x_pixel}, {y_pixel})") 
             return (x_pixel, y_pixel,rx,ry)
         return None
-
-    def detect_hand(self, frame):
+    
+    def detect_hand2(self, frame):
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         height, width, _ = frame.shape
-        results = pose.process(img_rgb)
+        results = hands.process(img_rgb)
         if results.pose_landmarks:
-            wrist = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST]
-            height, width, _ = frame.shape
-            center_x = width // 2
-            center_y = height // 2
-            x_pixel = int(wrist.x * width)
-            y_pixel = int(wrist.y * height)
-            if y_pixel < center_y:
-                rx = 1   
-            else:
-                rx = -1  
-
-            if x_pixel < center_x:
-                ry = 1   
-            else:
-                ry = -1  
-            print(f"[DEBUG] 검지 끝 좌표: ({x_pixel}, {y_pixel})")  # 🟢 디버깅용 출력
-            return (x_pixel, y_pixel,rx,ry)
+            for hand_landmarks in results.multi_hand_landmarks:
+                index_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
+                x_pixel = int(index_tip.x * width)
+                y_pixel = int(index_tip.y * height)
+                print(f"[DEBUG] 검지 끝 좌표: ({x_pixel}, {y_pixel})")
+                return (x_pixel, y_pixel)
         return None
+    
+    # def detect_hand(self, frame):
+    #     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    #     height, width, _ = frame.shape
+    #     results = pose.process(img_rgb)
+    #     if results.pose_landmarks:
+    #         wrist = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST]
+    #         height, width, _ = frame.shape
+    #         center_x = width // 2
+    #         center_y = height // 2
+    #         x_pixel = int(wrist.x * width)
+    #         y_pixel = int(wrist.y * height)
+    #         if y_pixel < center_y:
+    #             rx = 1   
+    #         else:
+    #             rx = -1  
+
+    #         if x_pixel < center_x:
+    #             ry = 1   
+    #         else:
+    #             ry = -1  
+    #         print(f"[DEBUG] 검지 끝 좌표: ({x_pixel}, {y_pixel})")  # 🟢 디버깅용 출력
+    #         return (x_pixel, y_pixel,rx,ry)
+    #     return None
+    
+    # def detect_shoulder(self, frame):
+    #     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    #     height, width, _ = frame.shape
+    #     results = pose.process(img_rgb)
+    #     if results.pose_landmarks:
+    #         shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER]
+    #         height, width, _ = frame.shape
+    #         center_x = width // 2
+    #         center_y = height // 2
+    #         x_pixel = int(shoulder.x * width)
+    #         y_pixel = int(shoulder.y * height)
+    #         if y_pixel < center_y:
+    #             rx = 1   
+    #         else:
+    #             rx = -1  
+
+    #         if x_pixel < center_x:
+    #             ry = 1   
+    #         else:
+    #             ry = -1  
+    #         print(f"[DEBUG] 검지 끝 좌표: ({x_pixel}, {y_pixel})")  # 🟢 디버깅용 출력
+    #         return (x_pixel, y_pixel,rx,ry)
+    #     return None
+    

@@ -7,7 +7,8 @@ from ament_index_python.packages import get_package_share_directory
 from od_msg.srv import SrvDepthPosition
 from object.realsense import ImgNode
 from object.yolo import YoloModel
-
+from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Bool
 
 PACKAGE_NAME = 'dovis'
 PACKAGE_PATH = get_package_share_directory(PACKAGE_NAME)
@@ -26,7 +27,30 @@ class ObjectDetectionNode(Node):
             'get_3d_position',
             self.handle_get_depth
         )
+
+        self.face_subscription = self.create_subscription(
+            Bool,
+            'face_command',
+            self.face_callback,
+            10
+        )
+
+        self.face_publisher = self.create_publisher(Float32MultiArray, 'face_depth_command', 10)
+
+        self.box_publisher = self.create_publisher(Float32MultiArray, 'box_command', 10)
         self.get_logger().info("ObjectDetectionNode initialized.")
+
+    def face_callback(self,msg):
+        command = msg.data
+        self.get_logger().info(f"수신된 명령: {command}")
+        if command:
+            coords = self._compute_position('얼굴')
+            #coords = 0.0 , 0.0 , 0.0
+            depth_position = [float(x) for x in coords]
+            if sum(depth_position) != 0:
+                msg = Float32MultiArray()
+                msg.data = depth_position
+                self.face_publisher.publish(msg)
 
     def _load_model(self, name):
         """모델 이름에 따라 인스턴스를 반환합니다."""
@@ -40,21 +64,25 @@ class ObjectDetectionNode(Node):
         coords = self._compute_position(request.target)
         response.depth_position = [float(x) for x in coords]
         return response
-
+    
     def _compute_position(self, target):
         """이미지를 처리해 객체의 카메라 좌표를 계산합니다."""
         rclpy.spin_once(self.img_node)
-        if target == '이거' or target == '자동' or target == '망치' or target == '가져가':
+        if target == '가져와' or target == '가져가' or target == '얼굴':
             if target == '가져가':
                 hand_pos = self.model.get_hand_detection(self.img_node)
-            else:
+            elif target == '가져와':
                 hand_pos = self.model.get_shoulder_detection(self.img_node)
+            elif target == '이거':
+                hand_pos = self.model.get_hand_detection2(self.img_node)
+            elif target == '얼굴':
+                hand_pos = self.model.get_face_detection(self.img_node)
             if hand_pos is not None:
                 x, y , rx , ry  = hand_pos
-                self.get_logger().info(f"검지 끝 좌표: x={x}")
-                self.get_logger().info(f"검지 끝 좌표: y={y}")
-                self.get_logger().info(f"검지 끝 좌표: rx={rx}")
-                self.get_logger().info(f"검지 끝 좌표: ry={ry}")
+                self.get_logger().info(f"x={x}")
+                self.get_logger().info(f"y={y}")
+                self.get_logger().info(f"rx={rx}")
+                self.get_logger().info(f"ry={ry}")
                 cz = self._get_depth(x, y)
                 if cz is None:
                     self.get_logger().warn("깊이 값이 범위를 벗어났습니다.")
@@ -74,7 +102,9 @@ class ObjectDetectionNode(Node):
         if cz is None:
             self.get_logger().warn("깊이 값이 범위를 벗어났습니다.")
             return 0.0, 0.0, 0.0
-
+        msg = Float32MultiArray()
+        msg.data = [box[i] for i in range(4)]
+        self.box_publisher.publish(msg)
         return self._pixel_to_camera_coords(cx, cy, cz)
 
     def _get_depth(self, x, y):

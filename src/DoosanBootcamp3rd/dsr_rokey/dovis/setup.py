@@ -29,6 +29,7 @@ setup(
             'control = control.robot_control:main',
             'gpt = gpt_processing.gpt:main',
             'object = object.detection:main',
+            'person = object.person:main',
         ],
     },
 )
