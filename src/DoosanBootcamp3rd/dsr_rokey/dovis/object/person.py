@@ -25,6 +25,7 @@ class YoloPersonDetector(Node):
         # 타이머: 0.1초마다 프레임 처리 (10Hz)
         self.timer = self.create_timer(0.1, self.timer_callback)
         self.get_logger().info("YOLO 사람 감지 노드 시작됨.")
+        self.person_toggle = False
 
     def timer_callback(self):
         ret, frame = self.cap.read()
@@ -46,7 +47,14 @@ class YoloPersonDetector(Node):
         msg = Int32()
         msg.data = person_count
         self.publisher_.publish(msg)
-        self.get_logger().info(f"🙋‍♀️ 사람 수: {person_count}")
+        if person_count > 1:
+            if self.person_toggle == False:
+                self.get_logger().info(f"🙋‍♀️ 작업자 외 사람 감지 ---------")
+                self.person_toggle = True
+        else:
+            if self.person_toggle == True:
+                self.get_logger().info(f"🙋‍♀️ 작업자만 감지 ---------")
+                self.person_toggle = False
 
     def destroy_node(self):
         self.cap.release()

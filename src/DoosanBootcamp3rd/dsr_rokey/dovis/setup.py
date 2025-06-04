@@ -17,6 +17,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
 	('share/' + package_name + '/resource', glob.glob('resource/*')),
 	('share/' + package_name + '/resource', glob.glob('resource/.env')),
+    ('share/' + package_name + '/launch', glob.glob('launch/*.launch.py')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

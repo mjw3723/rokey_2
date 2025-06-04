@@ -33,7 +33,7 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 class GPT:
     def __init__(self, openai_api_key):
         self.openai_api_key = openai_api_key
-        self.duration = 3
+        self.duration = 5
         self.samplerate = 16000
 
         self.llm = ChatOpenAI(
@@ -46,12 +46,13 @@ class GPT:
             - 문장에서 다음 리스트에 포함된 도구가 있다면 도구에 대한 대답만 해라.
             - 문장에 등장하는 도구의 목적지(어디로 옮기라고 했는지)도 함께 추출하세요.
             - 문장에서 유추할수 있는 도구가 있다면 그에 맞는 도구를 말해라.
+            - 문장에서 다음 리스트에 포함된 도구가 없다면 [소통 / () ] 로 출력해라. ()안에 사용자에게 전달할 말을 넣어라.
 
             <도구 리스트>
             - Hammer (해머), Screwdriver (드라이버), Wrench (랜치)
 
             <위치 리스트>
-            - 가져가 , 가져와
+            - 가져가 , 가져와 , 오른쪽 , 왼쪽
 
             <출력 형식>
             - 다음 형식을 반드시 따르세요: [도구1 도구2 ... / 위치1 위치2 ...]

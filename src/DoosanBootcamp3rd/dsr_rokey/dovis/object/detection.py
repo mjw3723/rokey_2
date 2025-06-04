@@ -39,13 +39,12 @@ class ObjectDetectionNode(Node):
 
         self.box_publisher = self.create_publisher(Float32MultiArray, 'box_command', 10)
         self.get_logger().info("ObjectDetectionNode initialized.")
+        self.face_detect = False
 
     def face_callback(self,msg):
-        command = msg.data
-        self.get_logger().info(f"수신된 명령: {command}")
-        if command:
+        face_detect  = msg.data
+        if face_detect :
             coords = self._compute_position('얼굴')
-            #coords = 0.0 , 0.0 , 0.0
             depth_position = [float(x) for x in coords]
             if sum(depth_position) != 0:
                 msg = Float32MultiArray()
@@ -70,15 +69,13 @@ class ObjectDetectionNode(Node):
         rclpy.spin_once(self.img_node)
         if target == '가져와' or target == '가져가' or target == '얼굴':
             if target == '가져가':
-                hand_pos = self.model.get_hand_detection(self.img_node)
+                pos = self.model.get_detection_pos(self.img_node,'hand')
             elif target == '가져와':
-                hand_pos = self.model.get_shoulder_detection(self.img_node)
-            elif target == '이거':
-                hand_pos = self.model.get_hand_detection2(self.img_node)
+                pos = self.model.get_detection_pos(self.img_node,'shoulder')
             elif target == '얼굴':
-                hand_pos = self.model.get_face_detection(self.img_node)
-            if hand_pos is not None:
-                x, y , rx , ry  = hand_pos
+                pos = self.model.get_detection_pos(self.img_node,'face')
+            if pos is not None:
+                x, y , rx , ry  = pos
                 self.get_logger().info(f"x={x}")
                 self.get_logger().info(f"y={y}")
                 self.get_logger().info(f"rx={rx}")
@@ -89,7 +86,6 @@ class ObjectDetectionNode(Node):
                     return 0.0, 0.0, 0.0
                 return self._pixel_to_camera_coords(x, y, cz , rx , ry )
             else:
-                self.get_logger().warn("손 검출 실패.")
                 return 0.0, 0.0, 0.0
         box, score = self.model.get_best_detection(self.img_node, target)
         if box is None or score is None:
@@ -121,7 +117,6 @@ class ObjectDetectionNode(Node):
         data = getter()
         while data is None or (isinstance(data, np.ndarray) and not data.any()):
             rclpy.spin_once(self.img_node)
-            self.get_logger().info(f"Retry getting {description}.")
             data = getter()
         return data
 

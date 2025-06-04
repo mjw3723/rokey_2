@@ -1,7 +1,6 @@
-
-#from langchain.chat_models import ChatOpenAI
 from langchain_community.chat_models import ChatOpenAI
 import openai
+from openai import OpenAI
 import sounddevice as sd
 import scipy.io.wavfile as wav
 import numpy as np
@@ -23,17 +22,20 @@ from std_msgs.msg import String
 from std_msgs.msg import Int32
 from std_msgs.msg import Bool
 from gpt_processing.wakeup_word import WakeupWord
-import re
+import time
+from rclpy.callback_groups import ReentrantCallbackGroup
 current_dir = os.getcwd()
 package_path = get_package_share_directory("dovis")
 is_laod = load_dotenv(dotenv_path=os.path.join(f"{package_path}/resource/.env"))
 openai_api_key = os.getenv("OPENAI_API_KEY")
+api_key = os.getenv("OPENAI_API_KEY2")
 class GPT(Node):
     def __init__(self, openai_api_key):
         self.openai_api_key = openai_api_key
         self.duration = 7  # seconds
         self.samplerate = 16000  # Whisper는 16kHz를 선호
-        super().__init__("gpt_node")
+        super().__init__("GPT")
+        client = OpenAI(api_key=openai_api_key)
         self.llm = ChatOpenAI(
             model="gpt-4o", temperature=0.5, openai_api_key=openai_api_key
         )
@@ -44,6 +46,7 @@ class GPT(Node):
             - 문장에서 다음 리스트에 포함된 도구가 있다면 도구에 대한 대답만 해라.
             - 문장에 등장하는 도구의 목적지(어디로 옮기라고 했는지)도 함께 추출하세요.
             - 문장에서 유추할수 있는 도구가 있다면 도구에 대한 대답해라
+            - 문장에서 다음 리스트에 포함된 도구가 없다면 [소통 / () ] 로 출력해라. ()안에 사용자에게 전달할 말을 넣어라.
 
             <도구 리스트>
             - Hammer (해머), Screwdriver (드라이버), Wrench (랜치)
@@ -101,75 +104,76 @@ class GPT(Node):
             10
         )
 
+        self.personSubscription = self.create_subscription(
+            Int32,
+            'person_count',
+            self.person_callback,
+            10
+        )
+
         self.face_publisher = self.create_publisher(Bool, 'face_command', 10)
         Mic = MicController()
         Mic.open_stream()
         self.wakeup = WakeupWord(Mic.config.buffer_size)
         self.wakeup.set_stream(Mic.stream)
         self.wake_state = True
+        self.timer = self.create_timer(1.0, self.wait_pause, callback_group=ReentrantCallbackGroup())
+        self.last_command_time = time.time() #  작업 공간 사람 탐지 시간
+        self.warning_count = 0
+        self.move_state = False
+        self.motion_paused = False
 
     def gpt_callback(self, msg):
         command = msg.data
         self.get_logger().info(f"수신된 명령: {command}")
         self.speak(command, lang='ko')
 
+        #사람 인식 callback
+    def person_callback(self,msg):
+        now = time.time()
+        personCount = msg.data
+        if personCount > 1:
+            if self.motion_paused != True:
+                self.motion_paused = True
+                self.last_command_time = now
+                if now - self.last_command_time > 1.0:
+                    self.last_command_time = now
+        else:
+            if self.motion_paused != False:
+                self.motion_paused = False
+                self.last_command_time = now
+    
+    def wait_pause(self):
+        if self.motion_paused:
+            self.warning_count +=1 
+            if self.warning_count > 5:
+                self.get_logger().info("⛔ 현재 위험상태")
+                self.speak('경고 현재 작업중입니다')
+                self.warning_count = 0
+        else:
+            self.get_logger().info("✅ 안전 상태, 작업 계속")
+
     def speech2text(self,request, response):
-        if self.wake_state:
-            self.get_logger().info("sdawaddsaadsaddaadssdasad")
-            while True:
-                msg = Bool()
-                msg.data = True
-                self.face_publisher.publish(msg)
-                if self.wakeup.is_wakeup():
-                    self.wake_state == False
-                    break
+        while self.wake_state:
+            msg = Bool()
+            msg.data = True
+            self.face_publisher.publish(msg)
+            if self.wakeup.is_wakeup():
+                self.wake_state = False
+                break
+        self.move_state = True
         self.speak('무엇을 도와드릴까요?', lang='ko')
         result , transcript = self.start_speak()
-        if '꺼' in transcript['text']:
+        if '꺼' in transcript.text:
             self.wake_state = True
             response.success = False
             response.message = '대기모드'
+            self.move_state = False
             return response
-        if '이거' in transcript['text']:
-            pass
-        # objects,positions = self.extract_keyword(result)
-        # if objects is None or positions is None:
-        #     response.success = False
-        #     response.message = '다시 말씀해주세요.'
-        #     return response
         response.success = True
         response.message = result
+        self.move_state = False
         return response
-        # position_keywords = ['홈', 'home']
-        # if any(k in transcript['text'] for k in position_keywords):
-        #     self.speak("형님, 홈 포지션으로 이동할게예~", lang='ko')
-        #     response.success = True
-        #     response.message = "홈"
-        #     return response
-        # elif '이거' in transcript['text'] or '저거' in transcript['text']:
-        #     self.speak("형님, 잡아드릴게예~", lang='ko')
-        #     response.success = True
-        #     response.message = "이거"
-        #     return response
-        # elif '자동' in transcript['text']:
-        #     self.speak("자동모드 입니다.", lang='ko')
-        #     response.success = True
-        #     response.message = "자동"
-        #     return response
-        # elif '망치' in transcript['text']:
-        #     response.success = True
-        #     response.message = "망치"
-        #     return response
-        # elif '가져다놔' in transcript['text'] or '가져가' in transcript['text']:
-        #     response.success = True
-        #     response.message = "가져가"
-        #     return response
-        # else:
-        #     self.speak(result, lang='ko')
-        #     response.success = False
-        #     response.message = "도구를 찾을 수 없습니다."
-        #     return response
-
         
     def gpt_response(self, user_input):
         response = self.lang_chain.invoke({"user_input": user_input})
@@ -178,25 +182,16 @@ class GPT(Node):
         return result
 
     def speak(self,text, lang='ko'):
-        tts = gTTS(text=text, lang=lang)
-        tts.save("output.mp3")
-        playsound("output.mp3")
-
-    def extract_keyword(self, text):
-        match = re.search(r"\[(.*?)\]", text)
-        if match:
-            result = match.group(1)
-            object, position = result.split("/")
-            objects = object.strip().split()
-            positions = position.strip().split()
-            return objects,positions
-        else:
-            self.speak('다시 말해주세요.')
-            return None,None
-    
-    def contains_dance_request(text):
-        keywords = ['춤춰', '춤춰줘', '춤 보여줘', '춤 부탁해', '댄스', '춤']
-        return any(keyword in text for keyword in keywords)
+        speech_file_path = os.path.join(f"{package_path}/resource/output.mp3")
+        client2 = OpenAI(api_key=api_key)
+        response = client2.audio.speech.create(
+            model="tts-1",  
+            voice="ash",  
+            input=f"{text}"
+        )
+        with open(speech_file_path, "wb") as f:
+            f.write(response.content)
+        playsound(speech_file_path)
     
     def start_speak(self):
         self.get_logger().info("음성 녹음을 시작합니다. \n 5초 동안 말해주세요...")
@@ -207,16 +202,15 @@ class GPT(Node):
         # 임시 WAV 파일 저장
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
             wav.write(temp_wav.name, self.samplerate, audio)
-
+            client = OpenAI(api_key=self.openai_api_key)
             # Whisper API 호출
             with open(temp_wav.name, "rb") as f:
-                transcript = openai.Audio.transcribe(
+                transcript = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=f,
-                    api_key=self.openai_api_key
                 )
-        self.get_logger().info(f"STT 결과: {transcript['text']}")
-        result = self.gpt_response(transcript['text'])
+        self.get_logger().info(f"STT 결과: {transcript.text}")
+        result = self.gpt_response(transcript.text)
         return result , transcript
     
 def main():

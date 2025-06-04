@@ -11,10 +11,6 @@ from ament_index_python.packages import get_package_share_directory
 from ultralytics import YOLO
 import numpy as np
 
-# mp_hands = mp.solutions.hands
-# hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1)
-# mp_draw = mp.solutions.drawing_utils
-
 mp_pose = mp.solutions.pose
 mp_hands = mp.solutions.hands
 pose = mp_pose.Pose(static_image_mode=False)
@@ -24,7 +20,7 @@ mp_draw = mp.solutions.drawing_utils
 PACKAGE_NAME = "dovis"
 PACKAGE_PATH = get_package_share_directory(PACKAGE_NAME)
 
-YOLO_MODEL_FILENAME = "yolo8_2.pt"
+YOLO_MODEL_FILENAME = "yolo_11n.pt"
 YOLO_CLASS_NAME_JSON = "class_name_tool2.json"
 
 YOLO_MODEL_PATH = os.path.join(PACKAGE_PATH, "resource", YOLO_MODEL_FILENAME)
@@ -87,10 +83,6 @@ class YoloModel:
         return best_det["box"], best_det["score"]
 
     def _aggregate_detections(self, results, confidence_threshold=0.5, iou_threshold=0.5):
-        """
-        Fuse raw detection boxes across frames using IoU-based grouping
-        and majority voting for robust final detections.
-        """
         raw = []
         for res in results:
             for box, score, label in zip(
@@ -141,50 +133,22 @@ class YoloModel:
         union = area1 + area2 - inter
         return inter / union if union > 0 else 0.0
     
-    def get_shoulder_detection(self, img_node):
+    def get_detection_pos(self,img_node,target):
         rclpy.spin_once(img_node)
         frames = self.get_frames(img_node)
         if not frames:
-            print("[DEBUG] 손 인식용 프레임이 없습니다.")
+            print(f"[DEBUG] {target} 인식용 프레임이 없습니다.")
             return None
         latest_frame = frames[-1]
-        hand_pos = self.detect_pose(latest_frame,mp_pose.PoseLandmark.RIGHT_SHOULDER)
-        print(f"[DEBUG] 감지된 손 위치: {hand_pos}")
-        return hand_pos
-    
-    def get_hand_detection(self, img_node):
-        rclpy.spin_once(img_node)
-        frames = self.get_frames(img_node)
-        if not frames:
-            print("[DEBUG] 손 인식용 프레임이 없습니다.")
-            return None
-        latest_frame = frames[-1]
-        hand_pos = self.detect_pose(latest_frame,mp_pose.PoseLandmark.RIGHT_WRIST)
-        print(f"[DEBUG] 감지된 손 위치: {hand_pos}")
-        return hand_pos
-    
-    def get_face_detection(self,img_node):
-        rclpy.spin_once(img_node)
-        frames = self.get_frames(img_node)
-        if not frames:
-            print("[DEBUG] 손 인식용 프레임이 없습니다.")
-            return None
-        latest_frame = frames[-1]
-        face_pos = self.detect_pose(latest_frame,mp_pose.PoseLandmark.NOSE)
-        print(f"[DEBUG] 감지된 얼굴 위치: {face_pos}")
-        return face_pos
-    
-    def get_hand_detection2(self,img_node):
-        rclpy.spin_once(img_node)
-        frames = self.get_frames(img_node)
-        if not frames:
-            print("[DEBUG] 손 인식용 프레임이 없습니다.")
-            return None
-        latest_frame = frames[-1]
-        hand_pos = self.detect_hand2(latest_frame)
-        print(f"[DEBUG] 감지된 손 위치: {hand_pos}")
-        return hand_pos
-        
+        if target == 'hand':
+            landmark = mp_pose.PoseLandmark.RIGHT_WRIST
+        if target == 'shoulder':
+            landmark = mp_pose.PoseLandmark.RIGHT_SHOULDER
+        if target == 'face':
+            landmark = mp_pose.PoseLandmark.NOSE
+        pos = self.detect_pose(latest_frame,landmark)
+        print(f"[DEBUG] 감지된 {target} 위치: {pos}")
+        return pos    
 
     def detect_pose(self,frame,landmark):
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -212,65 +176,3 @@ class YoloModel:
             print(f"[DEBUG] detect 좌표: ({x_pixel}, {y_pixel})") 
             return (x_pixel, y_pixel,rx,ry)
         return None
-    
-    def detect_hand2(self, frame):
-        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        height, width, _ = frame.shape
-        results = hands.process(img_rgb)
-        if results.pose_landmarks:
-            for hand_landmarks in results.multi_hand_landmarks:
-                index_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
-                x_pixel = int(index_tip.x * width)
-                y_pixel = int(index_tip.y * height)
-                print(f"[DEBUG] 검지 끝 좌표: ({x_pixel}, {y_pixel})")
-                return (x_pixel, y_pixel)
-        return None
-    
-    # def detect_hand(self, frame):
-    #     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    #     height, width, _ = frame.shape
-    #     results = pose.process(img_rgb)
-    #     if results.pose_landmarks:
-    #         wrist = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_WRIST]
-    #         height, width, _ = frame.shape
-    #         center_x = width // 2
-    #         center_y = height // 2
-    #         x_pixel = int(wrist.x * width)
-    #         y_pixel = int(wrist.y * height)
-    #         if y_pixel < center_y:
-    #             rx = 1   
-    #         else:
-    #             rx = -1  
-
-    #         if x_pixel < center_x:
-    #             ry = 1   
-    #         else:
-    #             ry = -1  
-    #         print(f"[DEBUG] 검지 끝 좌표: ({x_pixel}, {y_pixel})")  # 🟢 디버깅용 출력
-    #         return (x_pixel, y_pixel,rx,ry)
-    #     return None
-    
-    # def detect_shoulder(self, frame):
-    #     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    #     height, width, _ = frame.shape
-    #     results = pose.process(img_rgb)
-    #     if results.pose_landmarks:
-    #         shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER]
-    #         height, width, _ = frame.shape
-    #         center_x = width // 2
-    #         center_y = height // 2
-    #         x_pixel = int(shoulder.x * width)
-    #         y_pixel = int(shoulder.y * height)
-    #         if y_pixel < center_y:
-    #             rx = 1   
-    #         else:
-    #             rx = -1  
-
-    #         if x_pixel < center_x:
-    #             ry = 1   
-    #         else:
-    #             ry = -1  
-    #         print(f"[DEBUG] 검지 끝 좌표: ({x_pixel}, {y_pixel})")  # 🟢 디버깅용 출력
-    #         return (x_pixel, y_pixel,rx,ry)
-    #     return None
-    
