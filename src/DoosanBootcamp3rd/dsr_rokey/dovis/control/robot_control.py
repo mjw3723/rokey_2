@@ -180,12 +180,8 @@ class RobotController(Node):
             target_pos[4] = min(max(target_pos[4], -105), -75)
             if target_pos[0] < 250 and target_pos[2] < 450:
                 target_pos[2] = 450
-            self.face_count += 1
-            if self.face_count > 10:
-                self.send_message('안녕하세요.')
-                self.face_count = 0
             self.get_logger().info(f"[DEBUG] 얼굴 좌표 -> 로봇 좌표 변환 결과 : {target_pos}")
-            self.place_amove(target_pos)
+            self.place_amove(target_pos,None,None,False)
         except IndexError as e:
             self.get_logger().info(f"[DEBUG] Error : {str(e)}")
             pass
@@ -303,7 +299,7 @@ class RobotController(Node):
 
     #물체로 집기
     def pick_and_place_target(self, target_pos):
-        self.place_amove(target_pos,2,-5)
+        self.place_move(target_pos,2,-5)
         self.gripper_close()
         self.get_logger().info("이동 완료")
     
@@ -396,6 +392,8 @@ class RobotController(Node):
         while gripper.get_status()[0]:
             time.sleep(0.5)
 
+        self.init_robot_with_camera(True)
+
     #물체를 사람에게 전달
     def bring_tool_move(self,tool,position):
         hand_search_count = 0 # 어깨 위치 인식 카운트
@@ -417,7 +415,7 @@ class RobotController(Node):
         hand_pos = self.safe_area(hand_pos)
         self.send_message('작업자 위치 확인했어요')
         self.init_robot()
-        self.place_amove(get_current_posx()[0],0,-60,False)
+        self.place_move(get_current_posx()[0],0,-60)
         self.send_message(f'{tool} 가져올게요. 잠시만요.')
         while True:
             target_pos = self.get_target_pos(tool)
@@ -443,7 +441,7 @@ class RobotController(Node):
             if check_motion() == 0:
                 break
         force_control_on(1)
-        while not check_force_condition(DR_AXIS_X, max=3):
+        while not check_force_condition(DR_AXIS_X, max=5):
             wait_count += 1
             if wait_count % 3000 == 0:
                 self.send_message('팔 아파요')
@@ -473,7 +471,7 @@ class RobotController(Node):
         self.place_move(hand_pos,1,200)
         self.send_message(f'{tool}을 주세요')
         force_control_on(1)
-        while not check_force_condition(DR_AXIS_X, max=3) :
+        while not check_force_condition(DR_AXIS_X, max=5) :
             pass
         force_control_off()
         self.gripper_close()
@@ -501,9 +499,9 @@ class RobotController(Node):
 
     #로봇 이동영역 검사
     def safe_area(self,target_pos):
-        target_pos[0] = min(max(target_pos[0], 100), 400)
-        target_pos[1] = min(max(target_pos[1], -700), -400)
-        target_pos[2] = min(max(target_pos[2], 300), 500)
+        # target_pos[0] = min(max(target_pos[0], 100), 500)
+        # target_pos[1] = min(max(target_pos[1], -800), -300)
+        # target_pos[2] = min(max(target_pos[2], 200), 600)
         return target_pos
         
 

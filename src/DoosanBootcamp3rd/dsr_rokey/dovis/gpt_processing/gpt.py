@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 import rclpy
 import pyaudio
 from rclpy.node import Node
-#from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from gtts import gTTS
@@ -49,10 +48,10 @@ class GPT(Node):
             - 문장에서 다음 리스트에 포함된 도구가 없다면 [소통 / () ] 로 출력해라. ()안에 사용자에게 전달할 말을 넣어라.
 
             <도구 리스트>
-            - Hammer (해머), Screwdriver (드라이버), Wrench (랜치)
+            - Hammer (망치), Screwdriver (드라이버), Wrench (랜치) , pliers (플라이어)
 
             <위치 리스트>
-            - 가져가 , 가져와 , pos1
+            - 가져가 , 가져와 , right , left
 
             <출력 형식>
             - 다음 형식을 반드시 따르세요: [도구1 도구2 ... / 위치1 위치2 ...]
@@ -63,8 +62,23 @@ class GPT(Node):
             - 입력: "Hammer를 가져와
             출력: [Hammer / 가져와 ]
 
+            - 입력: "랜치 오른쪽에 둬"  
+            출력: [Wrench / right ]
+
+            - 입력: "드라이버 오른쪽에 둬"  
+            출력: [Screwdriver / right ]
+
+            - 입력: "플라이어 왼쪽에 둬"  
+            출력: [pliers / left ]
+
+            - 입력: "망치 왼쪽에 둬"  
+            출력: [Hammer / left ]
+
             - 입력: "Hammer를 가져가"  
             출력: [Hammer / 가져가 ]
+
+            - 입력: "망치 왼쪽에 두고 랜치 가져와"  
+            출력: [Hammer Wrench / left 가져와 ]
 
             - 입력: "Wrench 와 Screwdriver 를 가져와"  
             출력: [Wrench Screwdriver / 가져와 가져와 ]
@@ -151,7 +165,8 @@ class GPT(Node):
                 self.speak('경고 현재 작업중입니다')
                 self.warning_count = 0
         else:
-            self.get_logger().info("✅ 안전 상태, 작업 계속")
+            #self.get_logger().info("✅ 안전 상태, 작업 계속")
+            pass 
 
     def speech2text(self,request, response):
         while self.wake_state:
