@@ -108,6 +108,13 @@ base 데이터셋은 roboflow에 다른 사용자가 올린 데이터를 사용 
 
 ## 시연영상
 
+https://github.com/user-attachments/assets/61f985e3-9411-443b-bcc3-235c1610784b
+
+https://github.com/user-attachments/assets/823db88c-1388-49bf-9dde-dfca57e5f58e
+
+https://github.com/user-attachments/assets/38753a4d-eff7-40e3-9e45-65ecefad4ff5
+
+
 
 
 
